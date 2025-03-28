@@ -1,15 +1,26 @@
 #include <SAAB_HPD.h>
 
-// global variables
-uint8_t buffer[BUFFER_SIZE]; // buffer for incoming data
-uint8_t bufferIndex = 0; 
-uint8_t expectedLength = 0;
-bool syncFound = false;
+// SAAB_HPD class implementation
 
-// Initialization functions //
+SAAB_HPD::SAAB_HPD(HardwareSerial &serial) 
+    : SIDSerial(serial), printDebug(false), bufferIndex(0), expectedLength(0), syncFound(false) {}
 
+void SAAB_HPD::begin(uint32_t baudRate, uint8_t rxPin, uint8_t txPin) {
+    SIDSerial.begin(baudRate, SERIAL_8N1, rxPin, txPin);
+}
 
-// UART Data functions //
+void SAAB_HPD::setDebug(bool enable) {
+    printDebug = enable;
+}
+
+void SAAB_HPD::toggleDebug() {
+    printDebug = !printDebug;
+    if (printDebug) {
+        Serial.println("Debug printing enabled");
+    } else {
+        Serial.println("Debug printing disabled");
+    }
+}
 
 /*!
   * @brief Send SID data with checksum calculation.
@@ -24,27 +35,23 @@ bool syncFound = false;
   * @note The first byte sent is the length of the data (DLC), followed by the data bytes and finally the checksum byte.
   
 !*/
-void sendSidData(byte lenA, byte* data) {
-  uint16_t sum = 0;
-  byte dlc = lenA; // DLC is the length of the data
-  
-  // Send DLC
-  SIDSerial.write(dlc);
-  if (printDebug) Serial.printf("TX: 0x%02X,", dlc);
-  sum += dlc;
-  
-  // Send data and calculate checksum
-  for (byte i = 0; i < lenA; i++) {
-    SIDSerial.write(data[i]);
-    if (printDebug) Serial.printf("0x%02X,", data[i]);
-    sum += data[i];
-  }
-  
-  // Calculate and send checksum
-  byte checksum = sum & 0xFF;
-  SIDSerial.write(checksum);
-  if (printDebug) Serial.printf("0x%02X\n", checksum);
-  if (printDebug) Serial.println();
+void SAAB_HPD::sendSidData(byte lenA, byte* data) {
+    uint16_t sum = 0;
+    byte dlc = lenA;
+
+    SIDSerial.write(dlc);
+    if (printDebug) Serial.printf("TX: 0x%02X,", dlc);
+    sum += dlc;
+
+    for (byte i = 0; i < lenA; i++) {
+        SIDSerial.write(data[i]);
+        if (printDebug) Serial.printf("0x%02X,", data[i]);
+        sum += data[i];
+    }
+
+    byte checksum = sum & 0xFF;
+    SIDSerial.write(checksum);
+    if (printDebug) Serial.printf("0x%02X\n", checksum);
 }
 
 /*!
@@ -56,16 +63,27 @@ void sendSidData(byte lenA, byte* data) {
   
   * @note The function sends the bytes without any processing or checksum calculation.
 !*/
-void sendSidRawData(size_t len, byte* data) {
-  // send the bytes without any processing
-  if (printDebug) {
-    Serial.print("TX: ");
-    for (int i = 0; i < len; i++) {
-      Serial.printf(",0x%02X", data[i]);
+void SAAB_HPD::sendSidRawData(size_t len, byte* data) {
+    if (printDebug) {
+        Serial.print("TX: ");
+        for (size_t i = 0; i < len; i++) {
+            Serial.printf(",0x%02X", data[i]);
+        }
+        Serial.println();
     }
-    Serial.println();
-  }
-  SIDSerial.write(data, len);
+    SIDSerial.write(data, len);
+}
+
+/*!
+  * @brief Send a test mode message to SID. it will enter selftest mode.
+  * @return void
+  
+  * @note The function sends a predefined test mode message to the SID.
+  * @note Use this function with caution, as SID will not respond to any other commands until it exits test mode.
+!*/
+void SAAB_HPD::sendTestModeMessage() {
+    byte data[1] = {0x9F};
+    sendSidData(1,data); // Send the test mode message to SID
 }
 
 /*!
@@ -77,12 +95,12 @@ void sendSidRawData(size_t len, byte* data) {
   * @note The function calculates the checksum based on the received frame and compares it with the expected checksum.
   * @note The expected checksum is located at the position DLC + 1 in the frame.
 !*/
-bool verifyChecksum(uint8_t *frame) {
+bool SAAB_HPD::verifyChecksum(uint8_t *frame) {
   uint8_t dlc = frame[0]; // DLC (excluding itself and checksum)
   uint16_t calculatedSum = 0;
 
   // Sum all bytes except the checksum
-  for (uint8_t i = 0; i < dlc + 1; i++) { 
+  for (uint8_t i = 0; i < dlc + 1; i++) {
     calculatedSum += frame[i];
   }
 
@@ -108,8 +126,8 @@ bool verifyChecksum(uint8_t *frame) {
   * @note The function checks if the DLC is between (0x01 to 0xFE).
   * @note any other value is considered invalid.
 !*/
-bool isValidDLC(uint8_t dlc) {
-  return (dlc > 0x00 && dlc < 0xFE);  // DLC should be between 1 and 252
+bool SAAB_HPD::isValidDLC(uint8_t dlc) {
+    return (dlc > 0x00 && dlc < 0xFE);
 }
 
 /*!
@@ -122,25 +140,17 @@ bool isValidDLC(uint8_t dlc) {
   * @note It reads the incoming frame and returns true if a valid frame is received.
   * @note The frame is copied to the provided buffer and the buffer index is reset for the next frame.
 !*/
-bool readSIDserialData(uint8_t* frame) {
+bool SAAB_HPD::readSIDserialData(uint8_t* frame) {
   static uint8_t syncIndex = 0;
 
   while (SIDSerial.available()) {
     uint8_t byteReceived = SIDSerial.read();
 
-    /* too much data for now. every accepted frame is alredy printed
-        no need to print every byte received.
-    if (printDebug) { 
-      Serial.printf("RX: 0x%02X\n", byteReceived);
-    }
-    */
-
-    // Look for OK message as sync
     if (!syncFound) {
       if (byteReceived == okPattern[syncIndex]) {
         syncIndex++;
         if (syncIndex == okPatternLength) {
-          Serial.println("OK msg pattern detected!");
+          if (printDebug) Serial.println("OK msg pattern detected!");
           syncFound = true;
           bufferIndex = 0; // Reset buffer for new frame
           syncIndex = 0;
@@ -180,13 +190,7 @@ bool readSIDserialData(uint8_t* frame) {
   return false; // No valid frame received
 }
 
-// Function to process the received frame and recieved responses (to be implemented)
-
-// functions to create and modify regions on the SID display
-
-void makeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t xPos, uint8_t yPos, uint8_t width, uint8_t fontStyle, char* text) {
-  // Create a region with the specified parameters, SID command 0x10
-  // Format: mkRegion <regionID> <subRegionID0> <subRegionID1> <xPos> <yPos> <width> <fontStyle> <text>
+void SAAB_HPD::makeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t xPos, uint8_t yPos, uint8_t width, uint8_t fontStyle, char* text) {
   uint8_t data[100];
 
   // command statics
@@ -219,7 +223,7 @@ void makeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, ui
   sendSidData(13 + i, data);
 }
 
-void changeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t visible, uint8_t style, char* text) {
+void SAAB_HPD::changeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t visible, uint8_t style, char* text) {
   // Change the visibility and/or text of the specified region
   // Format: changeRegion <regionID> <subRegionID0> <subRegionID1> <visible> <style> [<text>]
   uint8_t data[100];
@@ -253,7 +257,7 @@ void changeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, 
   sendSidData(8 + i, data);
 }
 
-void drawRegion(uint8_t regionID, uint8_t drawFlag) {
+void SAAB_HPD::drawRegion(uint8_t regionID, uint8_t drawFlag) {
   // Draw the specified region -- when tested it deleted the region.?
   // Format: drawRegion <regionID> <drawFlag>
   uint8_t data[4];
@@ -271,7 +275,7 @@ void drawRegion(uint8_t regionID, uint8_t drawFlag) {
   sendSidData(4, data);
 }
 // these draw and clear functions are not well understood.
-void clearRegion(uint8_t regionID, uint8_t clearFlag){
+void SAAB_HPD::clearRegion(uint8_t regionID, uint8_t clearFlag){
   // Clear the specified region -- did about the same as 0x70?
   // Format: clearRegion <regionID> <clearFlag>
   uint8_t data[4];
@@ -289,9 +293,7 @@ void clearRegion(uint8_t regionID, uint8_t clearFlag){
   sendSidData(4, data);
 }
 
-// functions to modify the AUX and Play text region
-
-void replaceAuxPlayText(char* text) {
+void SAAB_HPD::replaceAuxPlayText(char* text) {
   // Replace the text in the aux play region (hide the Play and show own region)
   // Format: replaceAuxPlayText <text>
   // Example: replaceAuxPlayText "Song name - Artist" -> BT Song name - Artist (instead of AUX Play)
@@ -301,21 +303,21 @@ void replaceAuxPlayText(char* text) {
   uint8_t subRegionID0_text = 0x08;
   uint8_t subRegionID1 = 0xDF;
 
+  //Hide the 'Play' text
+  changeRegion(regionID, subRegionID0, subRegionID1, HPD_HIDDEN, HPD_STYLE_NORMAL);
+  delay(10);
 
-  
-  //hide the 'Play' text
-  changeRegion(regionID,subRegionID0,subRegionID1,0x03,0x00);
-  delay(10);
-  
-  // change AUX to BT 
+  // Change AUX to BT
+
   const char* aux = "BT ";
-  changeRegion(regionID,subRegionID0,0xCD,0x02,0x00, (char*)aux);
+  changeRegion(regionID, subRegionID0, 0xCD, HPD_VISIBLE, HPD_STYLE_NORMAL, (char*)aux);
   delay(10);
-  
-  // setup the new region
-  makeRegion(regionID, subRegionID0_text, subRegionID1, 207, 31, 0xE6, 0x02);
+
+  // Setup the new region
+
+  makeRegion(regionID, subRegionID0_text, subRegionID1, 207, 31, 0xE6, HPD_FONT_MEDIUM);
   delay(10);
-  
-  // change the new region to visible
-  changeRegion(regionID, subRegionID0_text, subRegionID1, 0x02, 0x00, text);
+
+  // Change the new region to visible and set the text
+  changeRegion(regionID, subRegionID0_text, subRegionID1, HPD_VISIBLE, HPD_STYLE_NORMAL, text);
 }
