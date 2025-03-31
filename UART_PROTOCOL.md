@@ -69,7 +69,7 @@ And from me (KickingAnimal) thanks to **LeighLeighLeigh** for having open source
 - 0x94, some kind of serial code
 -       0x95 as response
 - 0x96, some other kind of serial code
--       0x96 as response
+-       0x97 as response
 
 - 0x9f < self test mode (0x01,0x9f,0xA0)
 - 0xC0 Sent on poweroff of ICM?
