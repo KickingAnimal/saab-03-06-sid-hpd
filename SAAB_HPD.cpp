@@ -16,9 +16,9 @@ void SAAB_HPD::setDebug(bool enable) {
 void SAAB_HPD::toggleDebug() {
     printDebug = !printDebug;
     if (printDebug) {
-        Serial.println("Debug printing enabled");
+        Serial.println("Debug printing enabled (SAAB_HPD.cpp)");
     } else {
-        Serial.println("Debug printing disabled");
+        Serial.println("Debug printing disabled (SAAB_HPD.cpp)");
     }
 }
 
@@ -123,11 +123,11 @@ bool SAAB_HPD::verifyChecksum(uint8_t *frame) {
       The DLC value to be validated.
   * @return true if the DLC is valid, false otherwise.
   
-  * @note The function checks if the DLC is between (0x01 to 0xFE).
+  * @note The function checks if the DLC is between (0x01 to 0xFF).
   * @note any other value is considered invalid.
 !*/
 bool SAAB_HPD::isValidDLC(uint8_t dlc) {
-    return (dlc > 0x00 && dlc < 0xFE);
+    return (dlc > 0x00 && dlc < 0xFF);
 }
 
 /*!
@@ -147,10 +147,10 @@ bool SAAB_HPD::readSIDserialData(uint8_t* frame) {
     uint8_t byteReceived = SIDSerial.read();
 
     if (!syncFound) {
-      if (byteReceived == okPattern[syncIndex]) {
+      if (byteReceived == syncPattern[syncIndex]) {
         syncIndex++;
-        if (syncIndex == okPatternLength) {
-          if (printDebug) Serial.println("OK msg pattern detected!");
+        if (syncIndex == syncPatternLength) {
+          if (printDebug) Serial.println("Sync pattern detected! (0x81)");
           syncFound = true;
           bufferIndex = 0; // Reset buffer for new frame
           syncIndex = 0;

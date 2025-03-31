@@ -31,8 +31,8 @@
 #define BUFFER_SIZE 0xFF
 
 // Sync pattern for SID communication
-const uint8_t okPattern[] = {0x02, 0xFF, 0x00, 0x01};
-const uint8_t okPatternLength = sizeof(okPattern);
+const uint8_t syncPattern[] = {0x02, 0x81, 0x00, 0x83};
+const uint8_t syncPatternLength = sizeof(syncPattern);
 
 class SAAB_HPD {
 public:
