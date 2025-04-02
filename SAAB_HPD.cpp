@@ -3,7 +3,7 @@
 // SAAB_HPD class implementation
 
 SAAB_HPD::SAAB_HPD(HardwareSerial &serial) 
-    : SIDSerial(serial), printDebug(false), bufferIndex(0), expectedLength(0), syncFound(false) {}
+    : SIDSerial(serial), printDebug(false), bufferIndex(0), expectedLength(0), syncFound(false), frameCallback(nullptr) {}
 
 void SAAB_HPD::begin(uint32_t baudRate, uint8_t rxPin, uint8_t txPin) {
     SIDSerial.begin(baudRate, SERIAL_8N1, rxPin, txPin);
@@ -56,7 +56,7 @@ void SAAB_HPD::sendSidData(byte dlc, byte* data) {
 /*!
   * @brief Send raw SID data without checksum calculation.
   * @param data 
-      Pointer to the data to be sent.
+    Pointer to the data to be sent.
   * @note The data is structured as a byte array.
   * @return void
   * 
@@ -96,19 +96,19 @@ void SAAB_HPD::sendTestModeMessage() {
   * @note The expected checksum is located at the position DLC + 1 in the frame.
 !*/
 bool SAAB_HPD::verifyChecksum(const SerialFrame &frame) {
-  // Check if the frame is valid
-  uint16_t calculatedSum = 0;
-  uint8_t calculatedChecksum = calculateChecksum(frame); // Calculate checksum
-  uint8_t expectedChecksum = frame.checksum; // Extract expected checksum from the frame
+    // Check if the frame is valid
+    uint16_t calculatedSum = 0;
+    uint8_t calculatedChecksum = calculateChecksum(frame); // Calculate checksum
+    uint8_t expectedChecksum = frame.checksum; // Extract expected checksum from the frame
 
-  if (printDebug) {
-    Serial.printf("Calculated sum: 0x%04X\n", calculatedSum);
-    Serial.printf("Calculated checksum: 0x%02X\n", calculatedChecksum);
-    Serial.printf("Expected checksum: 0x%02X\n", expectedChecksum);
-    Serial.println(calculatedChecksum == expectedChecksum ? "Checksum match!" : "Checksum mismatch!");
-  }
+    if (printDebug) {
+        Serial.printf("Calculated sum: 0x%04X\n", calculatedSum);
+        Serial.printf("Calculated checksum: 0x%02X\n", calculatedChecksum);
+        Serial.printf("Expected checksum: 0x%02X\n", expectedChecksum);
+        Serial.println(calculatedChecksum == expectedChecksum ? "Checksum match!" : "Checksum mismatch!");
+    }
 
-  return calculatedChecksum == expectedChecksum; // Return if calulated checksum matches expected checksum 
+    return calculatedChecksum == expectedChecksum; // Return if calulated checksum matches expected checksum 
 }
 
 uint8_t SAAB_HPD::calculateChecksum(const SerialFrame &frame) {
@@ -146,231 +146,249 @@ bool SAAB_HPD::isValidDLC(uint8_t dlc) {
   * @note The frame is copied to the provided buffer and the buffer index is reset for the next frame.
 !*/
 bool SAAB_HPD::readSIDserialData(SerialFrame &frame) {
-  static uint8_t syncIndex = 0;
+    static uint8_t syncIndex = 0;
 
-  while (SIDSerial.available()) {
-    uint8_t byteReceived = SIDSerial.read();
+    while (SIDSerial.available()) {
+        uint8_t byteReceived = SIDSerial.read();
 
-    if (!syncFound) {
-      if (byteReceived == syncPattern[syncIndex]) {
-        syncIndex++;
-        if (syncIndex == syncPatternLength) {
-          if (printDebug) Serial.println("Sync pattern detected! (0x81)");
-          syncFound = true;
-          bufferIndex = 0; // Reset buffer for new frame
-          syncIndex = 0;
+        if (!syncFound) {
+            if (byteReceived == syncPattern[syncIndex]) {
+                syncIndex++;
+                if (syncIndex == syncPatternLength) {
+                    if (printDebug) Serial.println("Sync pattern detected! (0x81)");
+                    syncFound = true;
+                    bufferIndex = 0; // Reset buffer for new frame
+                    syncIndex = 0;
+                }
+            } else {
+                syncIndex = 0; // Reset sync search if mismatch
+            }
+            continue;
         }
-      } else {
-        syncIndex = 0; // Reset sync search if mismatch
-      }
-      continue;
+
+        // If sync is found, process the incoming frame
+        if (bufferIndex == 0) {
+            // First byte is DLC (excluding itself and checksum)
+            if (isValidDLC(byteReceived)) {
+                frame.dlc = byteReceived; // Store DLC in the frame struct
+        
+                buffer[bufferIndex++] = byteReceived;
+                expectedLength = frame.dlc + 2; // DLC + 2 (itself + checksum)
+                if (printDebug) {
+                    Serial.printf("DLC: 0x%02X\n", frame.dlc);
+                    Serial.printf("Expected total length: %02X\n", expectedLength);
+                }
+            } else {
+                Serial.println("Invalid DLC, resetting sync");
+                syncFound = false; // Reset sync if DLC is invalid
+                continue;
+            }
+        } else {
+            buffer[bufferIndex++] = byteReceived;
+
+            // If the full frame is received
+            if (bufferIndex == expectedLength) {
+                // populate the frame struct
+                frame.command = buffer[1]; // Command byte
+
+                memcpy(frame.data, &buffer[3], frame.dlc - 2); // Copy data bytes
+                frame.checksum = buffer[frame.dlc + 1]; // Checksum byte
+        
+                if (!verifyChecksum(frame)) {
+                    Serial.println("Checksum mismatch, resetting sync");
+                    bufferIndex = 0; // Reset buffer for next frame
+                    syncFound = false; // Reset sync if checksum is invalid
+                
+                    continue;
+                }         
+
+                bufferIndex = 0; // Reset buffer for next frame
+                return true; // Valid frame received
+            }
+        }
     }
 
-    // If sync is found, process the incoming frame
-    if (bufferIndex == 0) {
-      // First byte is DLC (excluding itself and checksum)
-      if (isValidDLC(byteReceived)) {
-        frame.dlc = byteReceived; // Store DLC in the frame struct
-        
-        buffer[bufferIndex++] = byteReceived;
-        expectedLength = frame.dlc + 2; // DLC + 2 (itself + checksum)
-        if (printDebug) {
-          Serial.printf("DLC: 0x%02X\n", frame.dlc);
-          Serial.printf("Expected total length: %02X\n", expectedLength);
-        }
-      } else {
-        Serial.println("Invalid DLC, resetting sync");
-        syncFound = false; // Reset sync if DLC is invalid
-        continue;
-      }
-    } else {
-      buffer[bufferIndex++] = byteReceived;
-
-      // If the full frame is received
-      if (bufferIndex == expectedLength) {
-        // populate the frame struct
-        frame.command = buffer[1]; // Command byte
-
-        memcpy(frame.data, &buffer[3], frame.dlc - 2); // Copy data bytes
-        frame.checksum = buffer[frame.dlc + 1]; // Checksum byte
-        
-        if (!verifyChecksum(frame)) {
-          Serial.println("Checksum mismatch, resetting sync");
-          bufferIndex = 0; // Reset buffer for next frame
-          syncFound = false; // Reset sync if checksum is invalid
-          continue;
-        }         
-
-        bufferIndex = 0; // Reset buffer for next frame
-        return true; // Valid frame received
-      }
-    }
-  }
-  return false; // No valid frame received
+    return false; // No valid frame received
 }
 
 void SAAB_HPD::makeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t xPos, uint8_t yPos, uint8_t width, uint8_t fontStyle, char* text) {
-  uint8_t data[100];
+    uint8_t data[100];
 
-  // command statics
-  data[0] = 0x10; // COMMAND
-  data[1] = 0x00; // spacing
-  data[3] = 0x00; // spacing
-  data[9] = 0x00; // spacing
-  data[11] = 0x00; // spacing
+      // command statics
+    data[0] = 0x10; // COMMAND
+    data[1] = 0x00; // spacing
+    data[3] = 0x00; // spacing
+    data[9] = 0x00; // spacing
+    data[11] = 0x00; // spacing
 
-  // command data
-  data[2] = regionID;
-  data[4] = subRegionID0;
-  data[5] = subRegionID1;
-  data[6] = 0x00; // idk, 0x01 sometimes
-  data[7] = fontStyle;
-  data[8] = width;
-  data[10] = xPos;
-  data[12] = yPos;
+    // command data
+    data[2] = regionID;
+    data[4] = subRegionID0;
+    data[5] = subRegionID1;
+    data[6] = 0x00; // idk, 0x01 sometimes
+    data[7] = fontStyle;
+    data[8] = width;
+    data[10] = xPos;
+    data[12] = yPos;
 
-  // Copy text to data. data is max 0xFE long
-  int i = 0;
-  if (text != nullptr) {
-    while (text[i] != '\0' && i < 0xFE) {
-      data[13 + i] = text[i];
-      i++;
+    // Copy text to data. data is max 0xFE long
+    int i = 0;
+    if (text != nullptr) {
+        while (text[i] != '\0' && i < 0xFE) {
+            data[13 + i] = text[i];
+            i++;
+        }
     }
-  }
 
-  // Send the data to SID
-  sendSidData(13 + i, data);
+    // Send the data to SID
+    sendSidData(13 + i, data);
 }
 
 void SAAB_HPD::changeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t visible, uint8_t style, char* text) {
-  // Change the visibility and/or text of the specified region
-  // Format: changeRegion <regionID> <subRegionID0> <subRegionID1> <visible> <style> [<text>]
-  uint8_t data[100];
+    // Change the visibility and/or text of the specified region
+    // Format: changeRegion <regionID> <subRegionID0> <subRegionID1> <visible> <style> [<text>]
+    uint8_t data[100];
 
-  // command statics
-  data[0] = 0x11; // COMMAND
-  data[1] = 0x00; // spacing
-  data[3] = 0x00; // spacing
-  data[9] = 0x00; // spacing
-  data[11] = 0x00; // spacing
+    // command statics
+    data[0] = 0x11; // COMMAND
+    data[1] = 0x00; // spacing
+    data[3] = 0x00; // spacing
+    data[9] = 0x00; // spacing
+    data[11] = 0x00; // spacing
 
-  // command data
-  data[2] = regionID;
-  data[4] = subRegionID0;
-  data[5] = subRegionID1;
-  data[6] = visible; // 0x02, 0x08 show, 0x03 (0x01?) hide
-  data[7] = style;
-  // 0x00 normal, 0x10 right align, 0x20 blinking, 
-  // 0x40 inverted, 0x80 underline (and more -> 0xff everything)
+    // command data
+    data[2] = regionID;
+    data[4] = subRegionID0;
+    data[5] = subRegionID1;
+    data[6] = visible; // 0x02, 0x08 show, 0x03 (0x01?) hide
+    data[7] = style;
+    // 0x00 normal, 0x10 right align, 0x20 blinking, 
+    // 0x40 inverted, 0x80 underline (and more -> 0xff everything)
 
-  // Copy text to data if provided
-  int i = 0;
-  if (text != nullptr) {
-    while (text[i] != '\0' && i < 0xFE) {
-      data[8 + i] = text[i];
-      i++;
+    // Copy text to data if provided
+    int i = 0;
+    if (text != nullptr) {
+        while (text[i] != '\0' && i < 0xFE) {
+            data[8 + i] = text[i];
+            i++;
+        }
     }
-  }
 
-  // Send the data to SID
-  sendSidData(8 + i, data);
+    // Send the data to SID
+    sendSidData(8 + i, data);
 }
 
 void SAAB_HPD::drawRegion(uint8_t regionID, uint8_t drawFlag) {
-  // Draw the specified region -- when tested it deleted the region.?
-  // Format: drawRegion <regionID> <drawFlag>
-  uint8_t data[4];
+    // Draw the specified region -- when tested it deleted the region.?
+    // Format: drawRegion <regionID> <drawFlag>
+    uint8_t data[4];
 
-  // command statics
-  data[0] = 0x70; // COMMAND
-  data[1] = 0x00; // spacing
-  data[3] = 0x00; // spacing
+    // command statics
+    data[0] = 0x70; // COMMAND
+    data[1] = 0x00; // spacing
+    data[3] = 0x00; // spacing
 
-  // command data
-  data[2] = regionID;
-  data[4] = drawFlag; //0x01?
+    // command data
+    data[2] = regionID;
+    data[4] = drawFlag; //0x01?
 
-  // Send the data to SID
-  sendSidData(4, data);
+    // Send the data to SID
+    sendSidData(4, data);
 }
 // these draw and clear functions are not well understood.
 void SAAB_HPD::clearRegion(uint8_t regionID, uint8_t clearFlag){
-  // Clear the specified region -- did about the same as 0x70?
-  // Format: clearRegion <regionID> <clearFlag>
-  uint8_t data[4];
+    // Clear the specified region -- did about the same as 0x70?
+    // Format: clearRegion <regionID> <clearFlag>
+    uint8_t data[4];
 
-  // command statics
-  data[0] = 0x60; // COMMAND
-  data[1] = 0x00; // spacing
-  data[3] = 0x00; // spacing
+    // command statics
+    data[0] = 0x60; // COMMAND
+    data[1] = 0x00; // spacing
+    data[3] = 0x00; // spacing
 
-  // command data
-  data[2] = regionID;
-  data[4] = clearFlag; // 0x01?
+    // command data
+    data[2] = regionID;
+    data[4] = clearFlag; // 0x01?
 
-  // Send the data to SID
-  sendSidData(4, data);
+    // Send the data to SID
+    sendSidData(4, data);
 }
 
 void SAAB_HPD::replaceAuxPlayText(char* text) {
-  // Replace the text in the aux play region (hide the Play and show own region)
-  // Format: replaceAuxPlayText <text>
-  // Example: replaceAuxPlayText "Song name - Artist" -> BT Song name - Artist (instead of AUX Play)
-  // This function needs to be reworked, to change the Play region to have greater width. and detect region states.
-  uint8_t regionID = 0x01;
-  uint8_t subRegionID0 = 0x02;
-  uint8_t subRegionID0_text = 0x08;
-  uint8_t subRegionID1 = 0xDF;
+    // Replace the text in the aux play region (hide the Play and show own region)
+    // Format: replaceAuxPlayText <text>
+    // Example: replaceAuxPlayText "Song name - Artist" -> BT Song name - Artist (instead of AUX Play)
+    
+    // This function needs to be reworked, to change the Play region to have greater width. and detect region states.
+    // This also should check the response from sid to determen if commands are successfully sent.
+    
+    
+    uint8_t regionID = 0x01;
+    uint8_t subRegionID0 = 0x02;
+    uint8_t subRegionID0_text = 0x08;
+    uint8_t subRegionID1 = 0xDF;
 
-  //Hide the 'Play' text
-  changeRegion(regionID, subRegionID0, subRegionID1, HPD_HIDDEN, HPD_STYLE_NORMAL);
-  delay(10);
+    //Hide the 'Play' text
+    changeRegion(regionID, subRegionID0, subRegionID1, HPD_HIDDEN, HPD_STYLE_NORMAL);
+    delay(10);
 
-  // Change AUX to BT
+    // Change AUX to BT
+    const char* aux = "BT ";
+    changeRegion(regionID, subRegionID0, 0xCD, HPD_VISIBLE, HPD_STYLE_NORMAL, (char*)aux);
+    delay(10);
 
-  const char* aux = "BT ";
-  changeRegion(regionID, subRegionID0, 0xCD, HPD_VISIBLE, HPD_STYLE_NORMAL, (char*)aux);
-  delay(10);
+    // Setup the new region
+    makeRegion(regionID, subRegionID0_text, subRegionID1, 207, 31, 0xE6, HPD_FONT_MEDIUM);
+    delay(10);
 
-  // Setup the new region
-
-  makeRegion(regionID, subRegionID0_text, subRegionID1, 207, 31, 0xE6, HPD_FONT_MEDIUM);
-  delay(10);
-
-  // Change the new region to visible and set the text
-  changeRegion(regionID, subRegionID0_text, subRegionID1, HPD_VISIBLE, HPD_STYLE_NORMAL, text);
+    // Change the new region to visible and set the text
+    changeRegion(regionID, subRegionID0_text, subRegionID1, HPD_VISIBLE, HPD_STYLE_NORMAL, text);
 }
 
 SAAB_HPD::MODE SAAB_HPD::currentMode() {
-  // Check the current mode based on SID 
-  // frame struct is to be used for this.
-  SerialFrame frame;
-  if (readSIDserialData(frame)) {
-    if (frame.command == 0x11) { // Check if the frame is a display update
-      if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xCD) {
-        return MODE_AUX;
-      } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xCF) {
-        return MODE_CD;
-      } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xD2) {
-        return MODE_CDX;
-      } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xD0) {
-        return MODE_CDC;
-      } else if (frame.data[0] == 0x00 && frame.data[2] == 0x00 && frame.data[3] == 0x13) {
-        // Check for FM1 or FM2 or AM.
-        // these are handled under the same ID (different logic than CD(C/X) and AUX)
+    // Check the current mode based on SID 
+    // frame struct is to be used for this.
+    SerialFrame frame;
+    if (readSIDserialData(frame)) {
+        if (frame.command == 0x11) { // Check if the frame is a display update
+            if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xCD) {
+                return MODE_AUX;
+            } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xCF) {
+                return MODE_CD;
+            } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xD2) {
+                return MODE_CDX;
+            } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xD0) {
+                return MODE_CDC;
+            } else if (frame.data[0] == 0x00 && frame.data[2] == 0x00 && frame.data[3] == 0x13) {
+                // Check for FM1 or FM2 or AM.
+                // these are handled under the same ID (different logic than CD(C/X) and AUX)
 
-        //check if there is text data
-        if (frame.data[6] == 0x46 && frame.data[7] == 0x4D) {
-          //FM
-          if (frame.data[8] == 0x31) {
-            return MODE_FM1; // FM1
-          } else if (frame.data[8] == 0x32) {
-            return MODE_FM2; // FM2
-          }
-        } else if (frame.data[6] == 0x41 && frame.data[7] == 0x4D) {
-          return MODE_AM; // AM
-        }        
-      }
+                //check if there is text data
+                if (frame.data[6] == 0x46 && frame.data[7] == 0x4D) {
+                    //FM
+                    if (frame.data[8] == 0x31) {
+                       return MODE_FM1; // FM1
+                    } else if (frame.data[8] == 0x32) {
+                        return MODE_FM2; // FM2
+                    }
+                } else if (frame.data[6] == 0x41 && frame.data[7] == 0x4D) {
+                    return MODE_AM; // AM
+                }        
+            }
+        }
+        return MODE_UNKNOWN; // Default if no mode is detected
     }
-    return MODE_UNKNOWN; // Default if no mode is detected
+}
+
+void SAAB_HPD::poll() {
+    SerialFrame frame;
+    if (readSIDserialData(frame)) {
+        if (frameCallback) {
+            frameCallback(frame); // Invoke the callback with the processed frame
+        }
+    }
+}
+
+void SAAB_HPD::setFrameCallback(FrameCallback callback) {
+    frameCallback = callback;
 }

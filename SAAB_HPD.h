@@ -52,16 +52,14 @@ public:
     void toggleDebug();
     
     void pollSerialData(); // Polls the SID serial data and processes it
-    bool readSIDserialData(SerialFrame &frame);
 
+    // sid communication functions
     void sendSidData(byte lenA, byte* data);
     void sendSidRawData(size_t len, byte* data);
     void sendTestModeMessage();
 
-    uint8_t calculateChecksum(const SerialFrame &frame);
-    bool verifyChecksum(const SerialFrame &frame);
-    bool isValidDLC(uint8_t dlc);
-
+    // Functions to create and modify regions on the display
+    // Should return the enum error/ack code from the SID
     void makeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t xPos, uint8_t yPos, uint8_t width, uint8_t fontStyle, char* text = nullptr);
     void changeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t visible, uint8_t style, char* text = nullptr);
     void replaceAuxPlayText(char* text);
@@ -82,6 +80,12 @@ public:
 
     MODE currentMode(); // Returns the current display mode as an enum
 
+    void poll(); // Polls and processes incoming SID serial data
+
+    // Callback for handling processed frames
+    typedef void (*FrameCallback)(const SerialFrame &frame);
+    void setFrameCallback(FrameCallback callback);
+
 private:
     HardwareSerial &SIDSerial;
     bool printDebug;
@@ -90,8 +94,13 @@ private:
     uint8_t expectedLength;
     bool syncFound;
 
-    // processFrame function to handle incoming frames
-    
+    FrameCallback frameCallback; // Callback function for processed frames
+
+    // Internal methods
+    bool readSIDserialData(SerialFrame &frame); // Now private
+    uint8_t calculateChecksum(const SerialFrame &frame);
+    bool verifyChecksum(const SerialFrame &frame);
+    bool isValidDLC(uint8_t dlc);
 };
 
 #endif // SAAB_HPD_H
