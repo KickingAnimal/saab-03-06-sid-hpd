@@ -4,26 +4,29 @@
 #include <Arduino.h>
 #include <HardwareSerial.h>
 
-// Style constants
-// Can be combined
-#define HPD_STYLE_NORMAL 0x00
-#define HPD_STYLE_RIGHT_ALIGN 0x10
-#define HPD_STYLE_BLINKING 0x20
-#define HPD_STYLE_INVERTED 0x40
-#define HPD_STYLE_UNDERLINE 0x80
-
-// Visibility constants
-#define HPD_VISIBLE 0x02
-#define HPD_HIDDEN 0x01
-#define HPD_VISIBLE_2 0x08
-#define HPD_HIDDEN_2 0x03 
-
-// Font/size constants
-#define HPD_FONT_SMALL 0x00
-#define HPD_FONT_LARGE 0x01
-#define HPD_FONT_MEDIUM 0x02
-#define HPD_FONT_TIME 0x04
-#define HPD_FONT_TIME_2 0x14
+// Namespace for constants
+namespace SAAB_HPD_Constants {
+    // Style constants
+    constexpr uint8_t HPD_STYLE_NORMAL = 0x00;
+    constexpr uint8_t HPD_STYLE_RIGHT_ALIGN = 0x10;
+    constexpr uint8_t HPD_STYLE_BLINKING = 0x20;
+    constexpr uint8_t HPD_STYLE_INVERTED = 0x40;
+    constexpr uint8_t HPD_STYLE_UNDERLINE = 0x80;
+    
+    // Visibility constants
+    constexpr uint8_t HPD_VISIBLE = 0x02;
+    constexpr uint8_t HPD_HIDDEN = 0x01;
+    constexpr uint8_t HPD_VISIBLE_2 = 0x08;
+    constexpr uint8_t HPD_HIDDEN_2 = 0x03;
+    
+    // Font/size constants
+    constexpr uint8_t HPD_FONT_SMALL = 0x00;
+    constexpr uint8_t HPD_FONT_LARGE = 0x01;
+    constexpr uint8_t HPD_FONT_MEDIUM = 0x02;
+    constexpr uint8_t HPD_FONT_TIME = 0x04;
+    constexpr uint8_t HPD_FONT_TIME_2 = 0x14;
+}
+using namespace SAAB_HPD_Constants; // Use the constants namespace
 
 // UART Configuration
 #define RXD2 33
@@ -53,18 +56,29 @@ public:
     
     void pollSerialData(); // Polls the SID serial data and processes it
 
+    // Enum for error codes
+    enum ERROR {
+        ERROR_OK = 0,          // Success
+        ERROR_TIMEOUT = -1,    // Timeout waiting for response
+        ERROR_INVALID_COMMAND = 0x31, // Invalid command
+        ERROR_REGION_EXISTS = 0x33,   // Region already exists
+        ERROR_INVALID_ARGS = 0x34,    // Invalid arguments/length
+        ERROR_UNKNOWN_35 = 0x35,      // Unknown error 0x35
+        ERROR_UNKNOWN_37 = 0x37       // Unknown error 0x37
+    };
+
     // sid communication functions
-    void sendSidData(byte lenA, byte* data);
+    ERROR sendSidData(byte lenA, byte* data); // Returns an ERROR enum
     void sendSidRawData(size_t len, byte* data);
     void sendTestModeMessage();
 
     // Functions to create and modify regions on the display
     // Should return the enum error/ack code from the SID
-    void makeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t xPos, uint8_t yPos, uint8_t width, uint8_t fontStyle, char* text = nullptr);
-    void changeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t visible, uint8_t style, char* text = nullptr);
+    ERROR makeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t xPos, uint8_t yPos, uint8_t width, uint8_t fontStyle, char* text = nullptr);
+    ERROR changeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t visible, uint8_t style, char* text = nullptr);
     void replaceAuxPlayText(char* text);
-    void drawRegion(uint8_t regionID, uint8_t drawFlag = 0x01);
-    void clearRegion(uint8_t regionID, uint8_t clearFlag = 0x01);
+    ERROR drawRegion(uint8_t regionID, uint8_t drawFlag = 0x01);
+    ERROR clearRegion(uint8_t regionID, uint8_t clearFlag = 0x01);
 
     // Enum for display modes
     enum MODE {
@@ -78,7 +92,7 @@ public:
         MODE_CDX
     };
 
-    MODE currentMode(); // Returns the current display mode as an enum
+    MODE getMode(); // Returns the current mode based on the last processed frame
 
     void poll(); // Polls and processes incoming SID serial data
 
@@ -101,6 +115,10 @@ private:
     uint8_t calculateChecksum(const SerialFrame &frame);
     bool verifyChecksum(const SerialFrame &frame);
     bool isValidDLC(uint8_t dlc);
+
+    void processMode(const SerialFrame &frame); // Updates the current mode based on the frame
+
+    MODE currentMode; // Stores the current mode based on the last processed frame
 };
 
 #endif // SAAB_HPD_H

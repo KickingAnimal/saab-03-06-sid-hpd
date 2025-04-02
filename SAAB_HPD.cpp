@@ -3,7 +3,7 @@
 // SAAB_HPD class implementation
 
 SAAB_HPD::SAAB_HPD(HardwareSerial &serial) 
-    : SIDSerial(serial), printDebug(false), bufferIndex(0), expectedLength(0), syncFound(false), frameCallback(nullptr) {}
+    : SIDSerial(serial), printDebug(false), bufferIndex(0), expectedLength(0), syncFound(false), frameCallback(nullptr), currentMode(MODE_UNKNOWN) {}
 
 void SAAB_HPD::begin(uint32_t baudRate, uint8_t rxPin, uint8_t txPin) {
     SIDSerial.begin(baudRate, SERIAL_8N1, rxPin, txPin);
@@ -23,19 +23,20 @@ void SAAB_HPD::toggleDebug() {
 }
 
 /*!
-  * @brief Send SID data with checksum calculation.
+  * @brief Send SID data with checksum calculation and wait for acknowledgment or error code.
   * @param lenA 
       Length of the data to be sent.
   * @param data 
       Pointer to the data to be sent. (without checksum or DLC)
-  * @return void
+  * @return ERROR
+      ERROR_OK for success, ERROR_TIMEOUT for timeout, or error code for failure.
   
   * @note The function calculates the checksum based on the data and sends it along with the data.
   * @note The checksum is calculated by summing all bytes in the data and taking the LSB of the sum.
   * @note The first byte sent is the length of the data (DLC), followed by the data bytes and finally the checksum byte.
   
 !*/
-void SAAB_HPD::sendSidData(byte dlc, byte* data) {
+SAAB_HPD::ERROR SAAB_HPD::sendSidData(byte dlc, byte* data) {
     uint16_t sum = 0;
 
     SIDSerial.write(dlc);
@@ -51,6 +52,21 @@ void SAAB_HPD::sendSidData(byte dlc, byte* data) {
     byte checksum = sum & 0xFF;
     SIDSerial.write(checksum);
     if (printDebug) Serial.printf("0x%02X\n", checksum);
+
+    // Wait for acknowledgment or error response
+    SerialFrame responseFrame;
+    unsigned long startTime = millis();
+    while (millis() - startTime < 100) { // Timeout after 100ms
+        if (readSIDserialData(responseFrame)) {
+            if (responseFrame.command == 0xFF && responseFrame.data[0] == 0x00) {
+                return ERROR_OK; // Success
+            } else if (responseFrame.command == 0xFE) {
+                return static_cast<ERROR>(responseFrame.data[2]); // Return error code
+            }
+        }
+    }
+
+    return ERROR_TIMEOUT; // Timeout or no valid response
 }
 
 /*!
@@ -211,10 +227,10 @@ bool SAAB_HPD::readSIDserialData(SerialFrame &frame) {
     return false; // No valid frame received
 }
 
-void SAAB_HPD::makeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t xPos, uint8_t yPos, uint8_t width, uint8_t fontStyle, char* text) {
+SAAB_HPD::ERROR SAAB_HPD::makeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t xPos, uint8_t yPos, uint8_t width, uint8_t fontStyle, char* text) {
     uint8_t data[100];
 
-      // command statics
+    // command statics
     data[0] = 0x10; // COMMAND
     data[1] = 0x00; // spacing
     data[3] = 0x00; // spacing
@@ -241,12 +257,10 @@ void SAAB_HPD::makeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subReg
     }
 
     // Send the data to SID
-    sendSidData(13 + i, data);
+    return sendSidData(13 + i, data);
 }
 
-void SAAB_HPD::changeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t visible, uint8_t style, char* text) {
-    // Change the visibility and/or text of the specified region
-    // Format: changeRegion <regionID> <subRegionID0> <subRegionID1> <visible> <style> [<text>]
+SAAB_HPD::ERROR SAAB_HPD::changeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t visible, uint8_t style, char* text) {
     uint8_t data[100];
 
     // command statics
@@ -262,8 +276,6 @@ void SAAB_HPD::changeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subR
     data[5] = subRegionID1;
     data[6] = visible; // 0x02, 0x08 show, 0x03 (0x01?) hide
     data[7] = style;
-    // 0x00 normal, 0x10 right align, 0x20 blinking, 
-    // 0x40 inverted, 0x80 underline (and more -> 0xff everything)
 
     // Copy text to data if provided
     int i = 0;
@@ -275,12 +287,10 @@ void SAAB_HPD::changeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subR
     }
 
     // Send the data to SID
-    sendSidData(8 + i, data);
+    return sendSidData(8 + i, data);
 }
 
-void SAAB_HPD::drawRegion(uint8_t regionID, uint8_t drawFlag) {
-    // Draw the specified region -- when tested it deleted the region.?
-    // Format: drawRegion <regionID> <drawFlag>
+SAAB_HPD::ERROR SAAB_HPD::drawRegion(uint8_t regionID, uint8_t drawFlag) {
     uint8_t data[4];
 
     // command statics
@@ -290,15 +300,13 @@ void SAAB_HPD::drawRegion(uint8_t regionID, uint8_t drawFlag) {
 
     // command data
     data[2] = regionID;
-    data[4] = drawFlag; //0x01?
+    data[4] = drawFlag; // 0x01?
 
     // Send the data to SID
-    sendSidData(4, data);
+    return sendSidData(4, data);
 }
-// these draw and clear functions are not well understood.
-void SAAB_HPD::clearRegion(uint8_t regionID, uint8_t clearFlag){
-    // Clear the specified region -- did about the same as 0x70?
-    // Format: clearRegion <regionID> <clearFlag>
+
+SAAB_HPD::ERROR SAAB_HPD::clearRegion(uint8_t regionID, uint8_t clearFlag) {
     uint8_t data[4];
 
     // command statics
@@ -311,84 +319,85 @@ void SAAB_HPD::clearRegion(uint8_t regionID, uint8_t clearFlag){
     data[4] = clearFlag; // 0x01?
 
     // Send the data to SID
-    sendSidData(4, data);
+    return sendSidData(4, data);
 }
 
 void SAAB_HPD::replaceAuxPlayText(char* text) {
-    // Replace the text in the aux play region (hide the Play and show own region)
-    // Format: replaceAuxPlayText <text>
-    // Example: replaceAuxPlayText "Song name - Artist" -> BT Song name - Artist (instead of AUX Play)
-    
-    // This function needs to be reworked, to change the Play region to have greater width. and detect region states.
-    // This also should check the response from sid to determen if commands are successfully sent.
-    
-    
     uint8_t regionID = 0x01;
     uint8_t subRegionID0 = 0x02;
     uint8_t subRegionID0_text = 0x08;
     uint8_t subRegionID1 = 0xDF;
+    const int maxRetries = 5; // Maximum number of retries for each operation
 
-    //Hide the 'Play' text
-    changeRegion(regionID, subRegionID0, subRegionID1, HPD_HIDDEN, HPD_STYLE_NORMAL);
-    delay(10);
+    // Retry until the 'Play' text is hidden or retries are exhausted
+    int retries = 0;
+    while (changeRegion(regionID, subRegionID0, subRegionID1, HPD_HIDDEN, HPD_STYLE_NORMAL) != ERROR_OK) {
+        if (++retries >= maxRetries) return;
+    }
 
-    // Change AUX to BT
+    // Retry until 'AUX' is changed to 'BT' or retries are exhausted
+    retries = 0;
     const char* aux = "BT ";
-    changeRegion(regionID, subRegionID0, 0xCD, HPD_VISIBLE, HPD_STYLE_NORMAL, (char*)aux);
-    delay(10);
+    while (changeRegion(regionID, subRegionID0, 0xCD, HPD_VISIBLE, HPD_STYLE_NORMAL, (char*)aux) != ERROR_OK) {
+        if (++retries >= maxRetries) return;
+    }
 
-    // Setup the new region
-    makeRegion(regionID, subRegionID0_text, subRegionID1, 207, 31, 0xE6, HPD_FONT_MEDIUM);
-    delay(10);
-
-    // Change the new region to visible and set the text
-    changeRegion(regionID, subRegionID0_text, subRegionID1, HPD_VISIBLE, HPD_STYLE_NORMAL, text);
-}
-
-SAAB_HPD::MODE SAAB_HPD::currentMode() {
-    // Check the current mode based on SID 
-    // frame struct is to be used for this.
-    SerialFrame frame;
-    if (readSIDserialData(frame)) {
-        if (frame.command == 0x11) { // Check if the frame is a display update
-            if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xCD) {
-                return MODE_AUX;
-            } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xCF) {
-                return MODE_CD;
-            } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xD2) {
-                return MODE_CDX;
-            } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xD0) {
-                return MODE_CDC;
-            } else if (frame.data[0] == 0x00 && frame.data[2] == 0x00 && frame.data[3] == 0x13) {
-                // Check for FM1 or FM2 or AM.
-                // these are handled under the same ID (different logic than CD(C/X) and AUX)
-
-                //check if there is text data
-                if (frame.data[6] == 0x46 && frame.data[7] == 0x4D) {
-                    //FM
-                    if (frame.data[8] == 0x31) {
-                       return MODE_FM1; // FM1
-                    } else if (frame.data[8] == 0x32) {
-                        return MODE_FM2; // FM2
-                    }
-                } else if (frame.data[6] == 0x41 && frame.data[7] == 0x4D) {
-                    return MODE_AM; // AM
-                }        
-            }
+    // Retry until the new region is created (makeRegion can fail if the region already exists) or retries are exhausted
+    retries = 0;
+    while (makeRegion(regionID, subRegionID0_text, subRegionID1, 207, 31, 0xE6, HPD_FONT_MEDIUM) != ERROR_OK) {
+        if (++retries >= maxRetries) break; // Proceed even if the region already exists
+        if(makeRegion(regionID, subRegionID0_text, subRegionID1, 207, 31, 0xE6, HPD_FONT_MEDIUM) == ERROR_REGION_EXISTS) {
+            break; // Region already exists, exit the loop
         }
-        return MODE_UNKNOWN; // Default if no mode is detected
+    }
+
+    // Retry until the new region is visible and the text is set or retries are exhausted
+    retries = 0;
+    while (changeRegion(regionID, subRegionID0_text, subRegionID1, HPD_VISIBLE, HPD_STYLE_NORMAL, text) != ERROR_OK) {
+        if (++retries >= maxRetries) return;
     }
 }
 
 void SAAB_HPD::poll() {
     SerialFrame frame;
     if (readSIDserialData(frame)) {
+        // Process the frame to update the current mode
+        processMode(frame);
+
+        // Invoke the callback with the processed frame, if set
         if (frameCallback) {
-            frameCallback(frame); // Invoke the callback with the processed frame
+            frameCallback(frame);
         }
     }
 }
 
-void SAAB_HPD::setFrameCallback(FrameCallback callback) {
-    frameCallback = callback;
+void SAAB_HPD::processMode(const SerialFrame &frame) {
+    if (frame.command == 0x11) { // Check if the frame is a display update
+        if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xCD) {
+            currentMode = MODE_AUX;
+        } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xCF) {
+            currentMode = MODE_CD;
+        } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xD2) {
+            currentMode = MODE_CDX;
+        } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xD0) {
+            currentMode = MODE_CDC;
+        } else if (frame.data[0] == 0x00 && frame.data[2] == 0x00 && frame.data[3] == 0x13) {
+            // Check for FM1, FM2, or AM
+            if (frame.data[6] == 0x46 && frame.data[7] == 0x4D) { // FM
+                if (frame.data[8] == 0x31) {
+                    currentMode = MODE_FM1;
+                } else if (frame.data[8] == 0x32) {
+                    currentMode = MODE_FM2;
+                }
+            } else if (frame.data[6] == 0x41 && frame.data[7] == 0x4D) { // AM
+                currentMode = MODE_AM;
+            }
+        } else {
+            currentMode = MODE_UNKNOWN;
+        }
+    }
+}
+
+SAAB_HPD::MODE SAAB_HPD::getMode() {
+    return currentMode; // Return the last known mode
 }
