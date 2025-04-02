@@ -35,15 +35,14 @@ void SAAB_HPD::toggleDebug() {
   * @note The first byte sent is the length of the data (DLC), followed by the data bytes and finally the checksum byte.
   
 !*/
-void SAAB_HPD::sendSidData(byte lenA, byte* data) {
+void SAAB_HPD::sendSidData(byte dlc, byte* data) {
     uint16_t sum = 0;
-    byte dlc = lenA;
 
     SIDSerial.write(dlc);
     if (printDebug) Serial.printf("TX: 0x%02X,", dlc);
     sum += dlc;
 
-    for (byte i = 0; i < lenA; i++) {
+    for (byte i = 0; i < dlc; i++) {
         SIDSerial.write(data[i]);
         if (printDebug) Serial.printf("0x%02X,", data[i]);
         sum += data[i];
@@ -60,7 +59,7 @@ void SAAB_HPD::sendSidData(byte lenA, byte* data) {
       Pointer to the data to be sent.
   * @note The data is structured as a byte array.
   * @return void
-  
+  * 
   * @note The function sends the bytes without any processing or checksum calculation.
 !*/
 void SAAB_HPD::sendSidRawData(size_t len, byte* data) {
@@ -77,44 +76,50 @@ void SAAB_HPD::sendSidRawData(size_t len, byte* data) {
 /*!
   * @brief Send a test mode message to SID. it will enter selftest mode.
   * @return void
-  
+  *   
   * @note The function sends a predefined test mode message to the SID.
   * @note Use this function with caution, as SID will not respond to any other commands until it exits test mode.
 !*/
 void SAAB_HPD::sendTestModeMessage() {
     byte data[1] = {0x9F};
-    sendSidData(1,data); // Send the test mode message to SID
+    sendSidData(1, data); // Send the test mode message to SID
 }
 
 /*!
   * @brief Verify the checksum of the received frame.
-  * @param frame 
-      Pointer to the received frame data.
+  * @param struct SerialFrame &frame 
+      The frame to be verified.
+      
   * @return true if the checksum is valid, false otherwise.
   
   * @note The function calculates the checksum based on the received frame and compares it with the expected checksum.
   * @note The expected checksum is located at the position DLC + 1 in the frame.
 !*/
-bool SAAB_HPD::verifyChecksum(uint8_t *frame) {
-  uint8_t dlc = frame[0]; // DLC (excluding itself and checksum)
+bool SAAB_HPD::verifyChecksum(const SerialFrame &frame) {
+  // Check if the frame is valid
   uint16_t calculatedSum = 0;
-
-  // Sum all bytes except the checksum
-  for (uint8_t i = 0; i < dlc + 1; i++) {
-    calculatedSum += frame[i];
-  }
-
-  uint8_t expectedChecksum = frame[dlc + 1]; // Checksum is at DLC + 1 position
-  uint8_t calculatedChecksum = calculatedSum & 0xFF; // Keep only LSB
+  uint8_t calculatedChecksum = calculateChecksum(frame); // Calculate checksum
+  uint8_t expectedChecksum = frame.checksum; // Extract expected checksum from the frame
 
   if (printDebug) {
-    Serial.printf("DLC: %02X\n", dlc);
     Serial.printf("Calculated sum: 0x%04X\n", calculatedSum);
     Serial.printf("Calculated checksum: 0x%02X\n", calculatedChecksum);
     Serial.printf("Expected checksum: 0x%02X\n", expectedChecksum);
     Serial.println(calculatedChecksum == expectedChecksum ? "Checksum match!" : "Checksum mismatch!");
   }
-  return calculatedChecksum == expectedChecksum;
+
+  return calculatedChecksum == expectedChecksum; // Return if calulated checksum matches expected checksum 
+}
+
+uint8_t SAAB_HPD::calculateChecksum(const SerialFrame &frame) {
+    uint16_t sum = frame.dlc; // Start with the DLC byte
+    sum += frame.command; // Add the command byte
+    // Add all data bytes
+    for (int i = 0; i < frame.dlc - 2; i++) {
+        sum += frame.data[i];
+    }
+
+    return sum & 0xFF; // Return the LSB of the sum
 }
 
 /*!
@@ -140,7 +145,7 @@ bool SAAB_HPD::isValidDLC(uint8_t dlc) {
   * @note It reads the incoming frame and returns true if a valid frame is received.
   * @note The frame is copied to the provided buffer and the buffer index is reset for the next frame.
 !*/
-bool SAAB_HPD::readSIDserialData(uint8_t* frame) {
+bool SAAB_HPD::readSIDserialData(SerialFrame &frame) {
   static uint8_t syncIndex = 0;
 
   while (SIDSerial.available()) {
@@ -165,11 +170,13 @@ bool SAAB_HPD::readSIDserialData(uint8_t* frame) {
     if (bufferIndex == 0) {
       // First byte is DLC (excluding itself and checksum)
       if (isValidDLC(byteReceived)) {
+        frame.dlc = byteReceived; // Store DLC in the frame struct
+        
         buffer[bufferIndex++] = byteReceived;
-        expectedLength = byteReceived + 2; // DLC + 2 (itself + checksum)
+        expectedLength = frame.dlc + 2; // DLC + 2 (itself + checksum)
         if (printDebug) {
-          Serial.printf("DLC: 0x%02X\n", byteReceived);
-          Serial.printf("Expected length: %02X\n", expectedLength);
+          Serial.printf("DLC: 0x%02X\n", frame.dlc);
+          Serial.printf("Expected total length: %02X\n", expectedLength);
         }
       } else {
         Serial.println("Invalid DLC, resetting sync");
@@ -181,7 +188,19 @@ bool SAAB_HPD::readSIDserialData(uint8_t* frame) {
 
       // If the full frame is received
       if (bufferIndex == expectedLength) {
-        memcpy(frame, buffer, expectedLength);
+        // populate the frame struct
+        frame.command = buffer[1]; // Command byte
+
+        memcpy(frame.data, &buffer[3], frame.dlc - 2); // Copy data bytes
+        frame.checksum = buffer[frame.dlc + 1]; // Checksum byte
+        
+        if (!verifyChecksum(frame)) {
+          Serial.println("Checksum mismatch, resetting sync");
+          bufferIndex = 0; // Reset buffer for next frame
+          syncFound = false; // Reset sync if checksum is invalid
+          continue;
+        }         
+
         bufferIndex = 0; // Reset buffer for next frame
         return true; // Valid frame received
       }
@@ -320,4 +339,38 @@ void SAAB_HPD::replaceAuxPlayText(char* text) {
 
   // Change the new region to visible and set the text
   changeRegion(regionID, subRegionID0_text, subRegionID1, HPD_VISIBLE, HPD_STYLE_NORMAL, text);
+}
+
+SAAB_HPD::MODE SAAB_HPD::currentMode() {
+  // Check the current mode based on SID 
+  // frame struct is to be used for this.
+  SerialFrame frame;
+  if (readSIDserialData(frame)) {
+    if (frame.command == 0x11) { // Check if the frame is a display update
+      if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xCD) {
+        return MODE_AUX;
+      } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xCF) {
+        return MODE_CD;
+      } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xD2) {
+        return MODE_CDX;
+      } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xD0) {
+        return MODE_CDC;
+      } else if (frame.data[0] == 0x00 && frame.data[2] == 0x00 && frame.data[3] == 0x13) {
+        // Check for FM1 or FM2 or AM.
+        // these are handled under the same ID (different logic than CD(C/X) and AUX)
+
+        //check if there is text data
+        if (frame.data[6] == 0x46 && frame.data[7] == 0x4D) {
+          //FM
+          if (frame.data[8] == 0x31) {
+            return MODE_FM1; // FM1
+          } else if (frame.data[8] == 0x32) {
+            return MODE_FM2; // FM2
+          }
+        } else if (frame.data[6] == 0x41 && frame.data[7] == 0x4D) {
+          return MODE_AM; // AM
+        }        
+      }
+    }
+    return MODE_UNKNOWN; // Default if no mode is detected
 }

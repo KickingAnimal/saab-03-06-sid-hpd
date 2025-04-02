@@ -36,26 +36,51 @@ const uint8_t syncPatternLength = sizeof(syncPattern);
 
 class SAAB_HPD {
 public:
+    // frame struct
+    struct SerialFrame {
+        uint8_t dlc; // Data Length Code
+        uint8_t command; // Command byte
+                        // padding is always 0x00
+        uint8_t data[BUFFER_SIZE - 3]; // Data bytes
+        uint8_t checksum; // Checksum byte
+    };
+
     SAAB_HPD(HardwareSerial &serial = Serial2);
 
     void begin(uint32_t baudRate = 115200, uint8_t rxPin = RXD2, uint8_t txPin = TXD2);
     void setDebug(bool enable = false);
     void toggleDebug();
+    
+    void pollSerialData(); // Polls the SID serial data and processes it
+    bool readSIDserialData(SerialFrame &frame);
 
     void sendSidData(byte lenA, byte* data);
     void sendSidRawData(size_t len, byte* data);
     void sendTestModeMessage();
 
-
-    bool verifyChecksum(uint8_t *frame);
+    uint8_t calculateChecksum(const SerialFrame &frame);
+    bool verifyChecksum(const SerialFrame &frame);
     bool isValidDLC(uint8_t dlc);
-    bool readSIDserialData(uint8_t* frame);
 
     void makeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t xPos, uint8_t yPos, uint8_t width, uint8_t fontStyle, char* text = nullptr);
     void changeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t visible, uint8_t style, char* text = nullptr);
     void replaceAuxPlayText(char* text);
     void drawRegion(uint8_t regionID, uint8_t drawFlag = 0x01);
     void clearRegion(uint8_t regionID, uint8_t clearFlag = 0x01);
+
+    // Enum for display modes
+    enum MODE {
+        MODE_UNKNOWN,
+        MODE_AUX,
+        MODE_FM1,
+        MODE_FM2,
+        MODE_AM,
+        MODE_CD,
+        MODE_CDC,
+        MODE_CDX
+    };
+
+    MODE currentMode(); // Returns the current display mode as an enum
 
 private:
     HardwareSerial &SIDSerial;
@@ -64,6 +89,9 @@ private:
     uint8_t bufferIndex;
     uint8_t expectedLength;
     bool syncFound;
+
+    // processFrame function to handle incoming frames
+    
 };
 
 #endif // SAAB_HPD_H
