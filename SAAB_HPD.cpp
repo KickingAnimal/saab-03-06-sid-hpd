@@ -331,54 +331,76 @@ SAAB_HPD::ERROR SAAB_HPD::clearRegion(uint8_t regionID, uint8_t clearFlag) {
     return sendSidData(frame);
 }
 
-void SAAB_HPD::recreateAuxRegion() {
-    // Clear the region
-    if (clearRegion(0x01, 0x00) != ERROR_OK) {
-        Serial.println("Error: Failed to clear region 0x01.");
-        return;
+bool SAAB_HPD::recreateAuxRegion() {
+    const int maxRetries = 10; // Maximum number of retries for each operation
+    int retryCount = 0;
+
+    // Retry clearing the region
+    while (retryCount < maxRetries) {
+        if (clearRegion(0x01, 0x00) == ERROR_OK) {
+            Serial.println("Cleared AUX region successfully!");
+            break;
+        } else {
+            Serial.println("Error: Failed to clear region 0x01. Retrying...");
+            retryCount++;
+            delay(100); // Wait before retrying
+        }
     }
 
-    // Helper lambda to handle errors
-    auto handleError = [](ERROR result, const char* description) {
-        if (result != ERROR_OK) {
-            Serial.printf("Error: %s failed with code 0x%02X.\n", description, result);
-            return false;
+    if (retryCount >= maxRetries) {
+        Serial.println("Error: Failed to clear AUX region after maximum retries.");
+        return false;
+    }
+
+    // Helper lambda to handle errors with retries
+    auto retryMakeRegion = [this, maxRetries](uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint16_t xPos, uint8_t yPos, uint8_t width, uint8_t fontStyle, char* text) {
+        int retryCount = 0;
+        while (retryCount < maxRetries) {
+            if (this->makeRegion(regionID, subRegionID0, subRegionID1, xPos, yPos, width, fontStyle, text) == ERROR_OK) {
+                return true;
+            } else {
+                retryCount++;
+                delay(100); // Wait before retrying
+            }
         }
-        return true;
+        return false;
     };
 
-    // Recreate regions
-    if (!handleError(makeRegion(0x01, 0x00, 0x3C, 187, 34, 8, HPD_FONT_LARGE), "makeRegion 0x3C") ||
-        !handleError(makeRegion(0x01, 0x00, 0x3D, 252, 31, 20, HPD_FONT_LARGE), "makeRegion 0x3D") ||
-        !handleError(makeRegion(0x01, 0x00, 0x3E, 207, 31, 44, HPD_FONT_LARGE), "makeRegion 0x3E") ||
-        !handleError(makeRegion(0x01, 0x02, 0xBF, 230, 54, 8, HPD_FONT_SMALL, (char*)"1"), "makeRegion 0xBF") ||
-        !handleError(makeRegion(0x01, 0x02, 0xC0, 238, 54, 8, HPD_FONT_SMALL, (char*)"2"), "makeRegion 0xC0") ||
-        !handleError(makeRegion(0x01, 0x02, 0xC1, 246, 54, 8, HPD_FONT_SMALL, (char*)"3"), "makeRegion 0xC1") ||
-        !handleError(makeRegion(0x01, 0x02, 0xC2, 254, 54, 8, HPD_FONT_SMALL, (char*)"4"), "makeRegion 0xC2") ||
-        !handleError(makeRegion(0x01, 0x02, 0xC3, 262, 54, 8, HPD_FONT_SMALL, (char*)"5"), "makeRegion 0xC3") ||
-        !handleError(makeRegion(0x01, 0x02, 0xC4, 270, 54, 8, HPD_FONT_SMALL, (char*)"6"), "makeRegion 0xC4") ||
-        !handleError(makeRegion(0x01, 0x02, 0xCD, 142, 34, 30, HPD_FONT_LARGE, (char*)"BT"), "makeRegion 0xCD") ||
-        !handleError(makeRegion(0x01, 0x02, 0xCF, 142, 34, 30, HPD_FONT_LARGE, (char*)"CD"), "makeRegion 0xCF") ||
-        !handleError(makeRegion(0x01, 0x02, 0xD0, 142, 34, 30, HPD_FONT_LARGE, (char*)"CDC"), "makeRegion 0xD0") ||
-        !handleError(makeRegion(0x01, 0x02, 0xD2, 142, 34, 30, HPD_FONT_LARGE, (char*)"CDX"), "makeRegion 0xD2") ||
-        !handleError(makeRegion(0x01, 0x02, 0xD5, 142, 34, 40, HPD_FONT_LARGE, (char*)"SCAN"), "makeRegion 0xD5") ||
-        !handleError(makeRegion(0x01, 0x02, 0xD7, 187, 34, 230, HPD_FONT_LARGE, (char*)"Checking magazine"), "makeRegion 0xD7") ||
-        !handleError(makeRegion(0x01, 0x02, 0xD9, 187, 34, 230, HPD_FONT_LARGE, (char*)"No magazine"), "makeRegion 0xD9") ||
-        !handleError(makeRegion(0x01, 0x02, 0xDB, 187, 34, 230, HPD_FONT_LARGE, (char*)"Press 1-6 to select CD"), "makeRegion 0xDB") ||
-        !handleError(makeRegion(0x01, 0x02, 0xDD, 207, 31, 61, HPD_FONT_MEDIUM, (char*)"No CD"), "makeRegion 0xDD") ||
-        !handleError(makeRegion(0x01, 0x02, 0xDF, 187, 31, 230, HPD_FONT_MEDIUM, (char*)"Play"), "makeRegion 0xDF") ||
-        !handleError(makeRegion(0x01, 0x02, 0xE6, 142, 54, 13, HPD_FONT_SMALL, (char*)"NO"), "makeRegion 0xE6") ||
-        !handleError(makeRegion(0x01, 0x02, 0xEA, 170, 54, 19, HPD_FONT_SMALL, (char*)"PTY"), "makeRegion 0xEA") ||
-        !handleError(makeRegion(0x01, 0x02, 0xEB, 192, 54, 19, HPD_FONT_SMALL, (char*)"RDM"), "makeRegion 0xEB") ||
-        !handleError(makeRegion(0x01, 0x02, 0xED, 154, 54, 13, HPD_FONT_SMALL, (char*)"TP"), "makeRegion 0xED")) {
-        Serial.println("Error: Failed to recreate AUX region.");
-        return;
+    // Recreate regions with retries
+    if (!retryMakeRegion(0x01, 0x00, 0x3C, 187, 34, 8, HPD_FONT_LARGE, nullptr) ||
+        !retryMakeRegion(0x01, 0x00, 0x3D, 252, 31, 20, HPD_FONT_LARGE, nullptr) ||
+        !retryMakeRegion(0x01, 0x00, 0x3E, 207, 31, 44, HPD_FONT_LARGE, nullptr) ||
+        !retryMakeRegion(0x01, 0x02, 0xBF, 230, 54, 8, HPD_FONT_SMALL, (char*)"1") ||
+        !retryMakeRegion(0x01, 0x02, 0xC0, 238, 54, 8, HPD_FONT_SMALL, (char*)"2") ||
+        !retryMakeRegion(0x01, 0x02, 0xC1, 246, 54, 8, HPD_FONT_SMALL, (char*)"3") ||
+        !retryMakeRegion(0x01, 0x02, 0xC2, 254, 54, 8, HPD_FONT_SMALL, (char*)"4") ||
+        !retryMakeRegion(0x01, 0x02, 0xC3, 262, 54, 8, HPD_FONT_SMALL, (char*)"5") ||
+        !retryMakeRegion(0x01, 0x02, 0xC4, 270, 54, 8, HPD_FONT_SMALL, (char*)"6") ||
+        !retryMakeRegion(0x01, 0x02, 0xCD, 142, 34, 30, HPD_FONT_LARGE, (char*)"BT") ||
+        !retryMakeRegion(0x01, 0x02, 0xCF, 142, 34, 30, HPD_FONT_LARGE, (char*)"CD") ||
+        !retryMakeRegion(0x01, 0x02, 0xD0, 142, 34, 30, HPD_FONT_LARGE, (char*)"CDC") ||
+        !retryMakeRegion(0x01, 0x02, 0xD2, 142, 34, 30, HPD_FONT_LARGE, (char*)"CDX") ||
+        !retryMakeRegion(0x01, 0x02, 0xD5, 142, 34, 40, HPD_FONT_LARGE, (char*)"SCAN") ||
+        !retryMakeRegion(0x01, 0x02, 0xD7, 187, 34, 230, HPD_FONT_LARGE, (char*)"Checking magazine") ||
+        !retryMakeRegion(0x01, 0x02, 0xD9, 187, 34, 230, HPD_FONT_LARGE, (char*)"No magazine") ||
+        !retryMakeRegion(0x01, 0x02, 0xDB, 187, 34, 230, HPD_FONT_LARGE, (char*)"Press 1-6 to select CD") ||
+        !retryMakeRegion(0x01, 0x02, 0xDD, 207, 31, 61, HPD_FONT_MEDIUM, (char*)"No CD") ||
+        !retryMakeRegion(0x01, 0x02, 0xDF, 187, 31, 230, HPD_FONT_MEDIUM, (char*)"Play") ||
+        !retryMakeRegion(0x01, 0x02, 0xE6, 142, 54, 13, HPD_FONT_SMALL, (char*)"NO") ||
+        !retryMakeRegion(0x01, 0x02, 0xEA, 170, 54, 19, HPD_FONT_SMALL, (char*)"PTY") ||
+        !retryMakeRegion(0x01, 0x02, 0xEB, 192, 54, 19, HPD_FONT_SMALL, (char*)"RDM") ||
+        !retryMakeRegion(0x01, 0x02, 0xED, 154, 54, 13, HPD_FONT_SMALL, (char*)"TP")) {
+        Serial.println("Error: Failed to recreate AUX regions after retries.");
+        return false;
     }
 
     // Draw the region
     if (drawRegion(0x01, 0x01) != ERROR_OK) {
         Serial.println("Error: Failed to draw region 0x01.");
+        return false;
     }
+
+    return true;
 }
 
 void SAAB_HPD::replaceAuxPlayText(char* text) {
