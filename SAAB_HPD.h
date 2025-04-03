@@ -74,7 +74,7 @@ public:
     // Should return the enum error/ack code from the SID
     ERROR makeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint16_t xPos, uint8_t yPos, uint8_t width, uint8_t fontStyle, char* text = nullptr);
     ERROR changeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t visible, uint8_t style, char* text = nullptr);
-    void recreateAuxRegion(); // Function to recreate the AUX region
+    bool recreateAuxRegion(); // Function to recreate the AUX region
     void replaceAuxPlayText(char* text); // Function to replace the "Play" region text
     ERROR drawRegion(uint8_t regionID, uint8_t drawFlag = 0x01);
     ERROR clearRegion(uint8_t regionID, uint8_t clearFlag = 0x01);
