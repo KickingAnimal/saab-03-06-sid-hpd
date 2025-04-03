@@ -11,14 +11,19 @@ void SAAB_HPD::begin(uint8_t rxPin, uint8_t txPin) {
 
 void SAAB_HPD::setDebug(bool enable) {
     printDebug = enable;
+    if (printDebug) {
+        Serial.println("Debug printing enabled (SAAB_HPD.cpp)");
+    } else {
+        Serial.println("Debug printing disabled (SAAB_HPD.cpp)");
+    }
 }
 
 void SAAB_HPD::toggleDebug() {
     printDebug = !printDebug;
     if (printDebug) {
-        Serial.println("Debug printing enabled (SAAB_HPD.cpp)");
+        Serial.println("Debug printing enabled: toggled (SAAB_HPD.cpp)");
     } else {
-        Serial.println("Debug printing disabled (SAAB_HPD.cpp)");
+        Serial.println("Debug printing disabled: toggled (SAAB_HPD.cpp)");
     }
 }
 
@@ -398,6 +403,20 @@ void SAAB_HPD::processMode(const SerialFrame &frame) {
 }
 
 SAAB_HPD::MODE SAAB_HPD::getMode() {
+    if (printDebug){
+        Serial.print("Current mode: ");
+        switch (currentMode) {
+            case MODE_AUX: Serial.println("AUX"); break;
+            case MODE_FM1: Serial.println("FM1"); break;
+            case MODE_FM2: Serial.println("FM2"); break;
+            case MODE_AM: Serial.println("AM"); break;
+            case MODE_CD: Serial.println("CD"); break;
+            case MODE_CDC: Serial.println("CDC"); break;
+            case MODE_CDX: Serial.println("CDX"); break;
+            default: Serial.println("Unknown mode"); break;
+        }
+    }
+
     return currentMode; // Return the last known mode
 }
 
