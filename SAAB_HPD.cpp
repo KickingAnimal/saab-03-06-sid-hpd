@@ -5,8 +5,8 @@
 SAAB_HPD::SAAB_HPD(HardwareSerial &serial) 
     : SIDSerial(serial), printDebug(false), bufferIndex(0), expectedLength(0), syncFound(false), frameCallback(nullptr), currentMode(MODE_UNKNOWN) {}
 
-void SAAB_HPD::begin(uint32_t baudRate, uint8_t rxPin, uint8_t txPin) {
-    SIDSerial.begin(baudRate, SERIAL_8N1, rxPin, txPin);
+void SAAB_HPD::begin(uint8_t rxPin, uint8_t txPin) {
+    SIDSerial.begin(115200, SERIAL_8N1, rxPin, txPin);
 }
 
 void SAAB_HPD::setDebug(bool enable) {
@@ -393,8 +393,6 @@ void SAAB_HPD::processMode(const SerialFrame &frame) {
             } else if (frame.data[6] == 0x41 && frame.data[7] == 0x4D) { // AM
                 currentMode = MODE_AM;
             }
-        } else {
-            currentMode = MODE_UNKNOWN;
         }
     }
 }

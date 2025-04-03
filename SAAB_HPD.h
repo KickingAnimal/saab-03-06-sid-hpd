@@ -28,9 +28,7 @@ namespace SAAB_HPD_Constants {
 }
 using namespace SAAB_HPD_Constants; // Use the constants namespace
 
-// UART Configuration
-#define RXD2 33
-#define TXD2 32
+// Buffer size for incoming data
 #define BUFFER_SIZE 0xFF
 
 // Sync pattern for SID communication
@@ -50,7 +48,7 @@ public:
 
     SAAB_HPD(HardwareSerial &serial = Serial2);
 
-    void begin(uint32_t baudRate = 115200, uint8_t rxPin = RXD2, uint8_t txPin = TXD2);
+    void begin(uint8_t rxPin, uint8_t txPin);
     void setDebug(bool enable = false);
     void toggleDebug();
     
