@@ -24,44 +24,53 @@ void SAAB_HPD::toggleDebug() {
 
 /*!
   * @brief Send SID data with checksum calculation and wait for acknowledgment or error code.
-  * @param lenA 
-      Length of the data to be sent.
-  * @param data 
-      Pointer to the data to be sent. (without checksum or DLC)
+  * @param frame 
+      The SerialFrame structure containing the data to be sent.
   * @return ERROR
       ERROR_OK for success, ERROR_TIMEOUT for timeout, or error code for failure.
   
-  * @note The function calculates the checksum based on the data and sends it along with the data.
-  * @note The checksum is calculated by summing all bytes in the data and taking the LSB of the sum.
-  * @note The first byte sent is the length of the data (DLC), followed by the data bytes and finally the checksum byte.
-  
+  * @note The function sends the frame data and waits for acknowledgment or error response.
 !*/
-SAAB_HPD::ERROR SAAB_HPD::sendSidData(byte dlc, byte* data) {
-    uint16_t sum = 0;
-
-    SIDSerial.write(dlc);
-    if (printDebug) Serial.printf("TX: 0x%02X,", dlc);
-    sum += dlc;
-
-    for (byte i = 0; i < dlc; i++) {
-        SIDSerial.write(data[i]);
-        if (printDebug) Serial.printf("0x%02X,", data[i]);
-        sum += data[i];
+SAAB_HPD::ERROR SAAB_HPD::sendSidData(SerialFrame &frame) {
+    // Calculate DLC if not already set
+    if (frame.dlc == 0) {
+        frame.dlc = 2 + strlen(reinterpret_cast<const char*>(frame.data)); // Command + padding + data length
     }
 
-    byte checksum = sum & 0xFF;
-    SIDSerial.write(checksum);
-    if (printDebug) Serial.printf("0x%02X\n", checksum);
+    // Calculate checksum
+    frame.checksum = calculateChecksum(frame);
+
+    // Send the frame
+    SIDSerial.write(frame.dlc);
+    SIDSerial.write(frame.command);
+    if (frame.dlc >= 2) {
+        SIDSerial.write(0x00); // Send padding byte
+    }
+    for (byte i = 0; i < frame.dlc - 2; i++) {
+        SIDSerial.write(frame.data[i]);
+    }
+    SIDSerial.write(frame.checksum);
+
+    if (printDebug) {
+        Serial.println("\n--- Frame Sent ---");
+        Serial.printf("TX: DLC: 0x%02X, COMMAND: 0x%02X, ", frame.dlc, frame.command);
+        if (frame.dlc >= 2) Serial.print("0x00, "); // Print padding byte
+        for (byte i = 0; i < frame.dlc - 2; i++) {
+            Serial.printf("0x%02X, ", frame.data[i]);
+        }
+        Serial.printf("CHECKSUM: 0x%02X\n", frame.checksum);
+        Serial.println("------------------");
+    }
 
     // Wait for acknowledgment or error response
     SerialFrame responseFrame;
     unsigned long startTime = millis();
     while (millis() - startTime < 100) { // Timeout after 100ms
         if (readSIDserialData(responseFrame)) {
-            if (responseFrame.command == 0xFF && responseFrame.data[0] == 0x00) {
+            if (responseFrame.command == 0xFF && responseFrame.dlc == 0x02) {
                 return ERROR_OK; // Success
             } else if (responseFrame.command == 0xFE) {
-                return static_cast<ERROR>(responseFrame.data[2]); // Return error code
+                return static_cast<ERROR>(responseFrame.data[0]); // Return error code
             }
         }
     }
@@ -80,11 +89,12 @@ SAAB_HPD::ERROR SAAB_HPD::sendSidData(byte dlc, byte* data) {
 !*/
 void SAAB_HPD::sendSidRawData(size_t len, byte* data) {
     if (printDebug) {
+        Serial.println("\n--- Raw Data Sent ---");
         Serial.print("TX: ");
         for (size_t i = 0; i < len; i++) {
             Serial.printf(",0x%02X", data[i]);
         }
-        Serial.println();
+        Serial.println("\n");
     }
     SIDSerial.write(data, len);
 }
@@ -97,8 +107,12 @@ void SAAB_HPD::sendSidRawData(size_t len, byte* data) {
   * @note Use this function with caution, as SID will not respond to any other commands until it exits test mode.
 !*/
 void SAAB_HPD::sendTestModeMessage() {
-    byte data[1] = {0x9F};
-    sendSidData(1, data); // Send the test mode message to SID
+    SerialFrame data = {
+        .dlc = 0x01, // DLC of 2 does also work with the padding byte
+        .command = 0x9F, // COMMAND
+    };
+
+    sendSidData(data); // Send the test mode message to SID
 }
 
 /*!
@@ -113,15 +127,13 @@ void SAAB_HPD::sendTestModeMessage() {
 !*/
 bool SAAB_HPD::verifyChecksum(const SerialFrame &frame) {
     // Check if the frame is valid
-    uint16_t calculatedSum = 0;
-    uint8_t calculatedChecksum = calculateChecksum(frame); // Calculate checksum
+    uint16_t calculatedChecksum = calculateChecksum(frame); // Calculate checksum
     uint8_t expectedChecksum = frame.checksum; // Extract expected checksum from the frame
 
     if (printDebug) {
-        Serial.printf("Calculated sum: 0x%04X\n", calculatedSum);
         Serial.printf("Calculated checksum: 0x%02X\n", calculatedChecksum);
         Serial.printf("Expected checksum: 0x%02X\n", expectedChecksum);
-        Serial.println(calculatedChecksum == expectedChecksum ? "Checksum match!" : "Checksum mismatch!");
+        Serial.println(calculatedChecksum == expectedChecksum ? "Checksum match!\n" : "\n!!!!!\nChecksum mismatch!\n");
     }
 
     return calculatedChecksum == expectedChecksum; // Return if calulated checksum matches expected checksum 
@@ -171,7 +183,7 @@ bool SAAB_HPD::readSIDserialData(SerialFrame &frame) {
             if (byteReceived == syncPattern[syncIndex]) {
                 syncIndex++;
                 if (syncIndex == syncPatternLength) {
-                    if (printDebug) Serial.println("Sync pattern detected! (0x81)");
+                    if (printDebug) Serial.println("\nSync pattern detected! (0x81)");
                     syncFound = true;
                     bufferIndex = 0; // Reset buffer for new frame
                     syncIndex = 0;
@@ -187,15 +199,14 @@ bool SAAB_HPD::readSIDserialData(SerialFrame &frame) {
             // First byte is DLC (excluding itself and checksum)
             if (isValidDLC(byteReceived)) {
                 frame.dlc = byteReceived; // Store DLC in the frame struct
-        
                 buffer[bufferIndex++] = byteReceived;
                 expectedLength = frame.dlc + 2; // DLC + 2 (itself + checksum)
+                memset(frame.data, 0, sizeof(frame.data)); // Clear residual data
                 if (printDebug) {
-                    Serial.printf("DLC: 0x%02X\n", frame.dlc);
-                    Serial.printf("Expected total length: %02X\n", expectedLength);
+                    Serial.printf("Expected total frame length: %02X\n", expectedLength);
                 }
             } else {
-                Serial.println("Invalid DLC, resetting sync");
+                if (printDebug) Serial.println("\nInvalid DLC, resetting sync");
                 syncFound = false; // Reset sync if DLC is invalid
                 continue;
             }
@@ -204,19 +215,20 @@ bool SAAB_HPD::readSIDserialData(SerialFrame &frame) {
 
             // If the full frame is received
             if (bufferIndex == expectedLength) {
-                // populate the frame struct
+                // Populate the frame struct
                 frame.command = buffer[1]; // Command byte
-
-                memcpy(frame.data, &buffer[3], frame.dlc - 2); // Copy data bytes
+                if (frame.dlc > 2) { // Only copy data if DLC > 2 (command + checksum)
+                    memcpy(frame.data, &buffer[3], frame.dlc - 2); // Copy data bytes
+                }
                 frame.checksum = buffer[frame.dlc + 1]; // Checksum byte
-        
+
+                // Verify checksum
                 if (!verifyChecksum(frame)) {
-                    Serial.println("Checksum mismatch, resetting sync");
+                    if (printDebug) Serial.println("\nChecksum mismatch, resetting sync");
                     bufferIndex = 0; // Reset buffer for next frame
                     syncFound = false; // Reset sync if checksum is invalid
-                
                     continue;
-                }         
+                }
 
                 bufferIndex = 0; // Reset buffer for next frame
                 return true; // Valid frame received
@@ -228,98 +240,86 @@ bool SAAB_HPD::readSIDserialData(SerialFrame &frame) {
 }
 
 SAAB_HPD::ERROR SAAB_HPD::makeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t xPos, uint8_t yPos, uint8_t width, uint8_t fontStyle, char* text) {
-    uint8_t data[100];
+    SerialFrame frame;
+    frame.command = 0x10; // COMMAND
+    frame.dlc = 13; // Base DLC
 
-    // command statics
-    data[0] = 0x10; // COMMAND
-    data[1] = 0x00; // spacing
-    data[3] = 0x00; // spacing
-    data[9] = 0x00; // spacing
-    data[11] = 0x00; // spacing
+    frame.data[0] = regionID;
+    frame.data[1] = 0x00; // Unknown, always 0x00
+    frame.data[2] = subRegionID0;
+    frame.data[3] = subRegionID1;
+    frame.data[4] = 0x01; // Unknown, sometimes 0x00
+    frame.data[5] = fontStyle;
+    frame.data[6] = width;
+    frame.data[7] = 0x00;
+    frame.data[8] = xPos;
+    frame.data[10] = yPos;
 
-    // command data
-    data[2] = regionID;
-    data[4] = subRegionID0;
-    data[5] = subRegionID1;
-    data[6] = 0x00; // idk, 0x01 sometimes
-    data[7] = fontStyle;
-    data[8] = width;
-    data[10] = xPos;
-    data[12] = yPos;
-
-    // Copy text to data. data is max 0xFE long
+    // Copy text to frame data if provided
     int i = 0;
     if (text != nullptr) {
-        while (text[i] != '\0' && i < 0xFE) {
-            data[13 + i] = text[i];
+        while (text[i] != '\0' && i < BUFFER_SIZE - 11) {
+            frame.data[11 + i] = text[i];
             i++;
         }
+        frame.dlc += i; // Adjust DLC for text length
     }
 
-    // Send the data to SID
-    return sendSidData(13 + i, data);
+    frame.checksum = calculateChecksum(frame);
+    return sendSidData(frame);
 }
 
 SAAB_HPD::ERROR SAAB_HPD::changeRegion(uint8_t regionID, uint8_t subRegionID0, uint8_t subRegionID1, uint8_t visible, uint8_t style, char* text) {
-    uint8_t data[100];
+    SerialFrame frame;
+    frame.command = 0x11; // COMMAND
+    frame.dlc = 8; // Base DLC
 
-    // command statics
-    data[0] = 0x11; // COMMAND
-    data[1] = 0x00; // spacing
-    data[3] = 0x00; // spacing
-    data[9] = 0x00; // spacing
-    data[11] = 0x00; // spacing
+    frame.data[0] = regionID;
+    frame.data[1] = 0x00; // Unknown, always 0x00
+    frame.data[2] = subRegionID0;
+    frame.data[3] = subRegionID1;
+    frame.data[4] = visible; // 0x02, 0x08 show, 0x03 (0x01?) hide
+    frame.data[5] = style;
+    
 
-    // command data
-    data[2] = regionID;
-    data[4] = subRegionID0;
-    data[5] = subRegionID1;
-    data[6] = visible; // 0x02, 0x08 show, 0x03 (0x01?) hide
-    data[7] = style;
-
-    // Copy text to data if provided
+    // Copy text to frame data if provided
     int i = 0;
     if (text != nullptr) {
-        while (text[i] != '\0' && i < 0xFE) {
-            data[8 + i] = text[i];
+        while (text[i] != '\0' && i < BUFFER_SIZE - 6) {
+            frame.data[6 + i] = text[i];
             i++;
         }
+        frame.dlc += i; // Adjust DLC for text length
     }
 
-    // Send the data to SID
-    return sendSidData(8 + i, data);
+    frame.checksum = calculateChecksum(frame);
+    return sendSidData(frame);
 }
 
 SAAB_HPD::ERROR SAAB_HPD::drawRegion(uint8_t regionID, uint8_t drawFlag) {
-    uint8_t data[4];
+    SerialFrame frame;
+    frame.command = 0x70; // COMMAND
+    frame.dlc = 4; // DLC for drawRegion
 
-    // command statics
-    data[0] = 0x70; // COMMAND
-    data[1] = 0x00; // spacing
-    data[3] = 0x00; // spacing
+    frame.data[0] = regionID;
+    frame.data[1] = 0x00;
+    frame.data[2] = drawFlag; // 0x01 to draw, 0x00 to hide
 
-    // command data
-    data[2] = regionID;
-    data[4] = drawFlag; // 0x01?
-
-    // Send the data to SID
-    return sendSidData(4, data);
+    frame.checksum = calculateChecksum(frame);
+    return sendSidData(frame);
 }
 
 SAAB_HPD::ERROR SAAB_HPD::clearRegion(uint8_t regionID, uint8_t clearFlag) {
-    uint8_t data[4];
+    SerialFrame frame;
+    frame.command = 0x60; // COMMAND
+    frame.dlc = 4; // DLC for clearRegion
 
-    // command statics
-    data[0] = 0x60; // COMMAND
-    data[1] = 0x00; // spacing
-    data[3] = 0x00; // spacing
+    frame.data[0] = regionID;
+    frame.data[1] = 0x00; // Unknown, always 0x00
+    frame.data[2] = clearFlag; // 0x01?
 
-    // command data
-    data[2] = regionID;
-    data[4] = clearFlag; // 0x01?
-
-    // Send the data to SID
-    return sendSidData(4, data);
+    frame.checksum = calculateChecksum(frame);
+    return sendSidData(frame);
 }
 
 void SAAB_HPD::replaceAuxPlayText(char* text) {
@@ -342,13 +342,14 @@ void SAAB_HPD::replaceAuxPlayText(char* text) {
         if (++retries >= maxRetries) return;
     }
 
-    // Retry until the new region is created (makeRegion can fail if the region already exists) or retries are exhausted
+    // Retry until the new region is created or retries are exhausted
     retries = 0;
-    while (makeRegion(regionID, subRegionID0_text, subRegionID1, 207, 31, 0xE6, HPD_FONT_MEDIUM) != ERROR_OK) {
-        if (++retries >= maxRetries) break; // Proceed even if the region already exists
-        if(makeRegion(regionID, subRegionID0_text, subRegionID1, 207, 31, 0xE6, HPD_FONT_MEDIUM) == ERROR_REGION_EXISTS) {
-            break; // Region already exists, exit the loop
+    while (retries < maxRetries) {
+        SAAB_HPD::ERROR result = makeRegion(regionID, subRegionID0_text, subRegionID1, 207, 31, 0xE6, HPD_FONT_MEDIUM);
+        if (result == ERROR_OK || result == ERROR_REGION_EXISTS) {
+            break; // Exit loop if successful or region already exists
         }
+        retries++;
     }
 
     // Retry until the new region is visible and the text is set or retries are exhausted
@@ -400,4 +401,8 @@ void SAAB_HPD::processMode(const SerialFrame &frame) {
 
 SAAB_HPD::MODE SAAB_HPD::getMode() {
     return currentMode; // Return the last known mode
+}
+
+void SAAB_HPD::setFrameCallback(FrameCallback callback) {
+    frameCallback = callback;
 }

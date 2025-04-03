@@ -68,7 +68,7 @@ public:
     };
 
     // sid communication functions
-    ERROR sendSidData(byte lenA, byte* data); // Returns an ERROR enum
+    ERROR sendSidData(SerialFrame &frame); // Returns an ERROR enum
     void sendSidRawData(size_t len, byte* data);
     void sendTestModeMessage();
 
