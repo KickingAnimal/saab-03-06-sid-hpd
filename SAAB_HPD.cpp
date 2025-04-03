@@ -404,10 +404,10 @@ void SAAB_HPD::poll() {
 
 void SAAB_HPD::processMode(const SerialFrame &frame) {
     if (frame.command == 0x11) { // Check if the frame is a display update
-        if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xCD) {
-            currentMode = MODE_AUX;
-        } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xCF) {
+        if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xCF) {
             currentMode = MODE_CD;
+        } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xCD) {
+            currentMode = MODE_AUX;
         } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xD2) {
             currentMode = MODE_CDX;
         } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xD0) {
