@@ -350,11 +350,13 @@ void SAAB_HPD::recreateAuxRegion() {
     // Recreate regions
     if (!handleError(makeRegion(0x01, 0x00, 0x3C, 187, 34, 8, HPD_FONT_LARGE), "makeRegion 0x3C") ||
         !handleError(makeRegion(0x01, 0x00, 0x3D, 252, 31, 20, HPD_FONT_LARGE), "makeRegion 0x3D") ||
+        !handleError(makeRegion(0x01, 0x00, 0x3E, 207, 31, 44, HPD_FONT_LARGE), "makeRegion 0x3E") ||
         !handleError(makeRegion(0x01, 0x02, 0xBF, 230, 54, 8, HPD_FONT_SMALL, (char*)"1"), "makeRegion 0xBF") ||
         !handleError(makeRegion(0x01, 0x02, 0xC0, 238, 54, 8, HPD_FONT_SMALL, (char*)"2"), "makeRegion 0xC0") ||
         !handleError(makeRegion(0x01, 0x02, 0xC1, 246, 54, 8, HPD_FONT_SMALL, (char*)"3"), "makeRegion 0xC1") ||
         !handleError(makeRegion(0x01, 0x02, 0xC2, 254, 54, 8, HPD_FONT_SMALL, (char*)"4"), "makeRegion 0xC2") ||
-        !handleError(makeRegion(0x01, 0x02, 0xC3, 6, 54, 8, HPD_FONT_SMALL, (char*)"5"), "makeRegion 0xC3") ||
+        !handleError(makeRegion(0x01, 0x02, 0xC3, 262, 54, 8, HPD_FONT_SMALL, (char*)"5"), "makeRegion 0xC3") ||
+        !handleError(makeRegion(0x01, 0x02, 0xC4, 270, 54, 8, HPD_FONT_SMALL, (char*)"6"), "makeRegion 0xC4") ||
         !handleError(makeRegion(0x01, 0x02, 0xCD, 142, 34, 30, HPD_FONT_LARGE, (char*)"BT"), "makeRegion 0xCD") ||
         !handleError(makeRegion(0x01, 0x02, 0xCF, 142, 34, 30, HPD_FONT_LARGE, (char*)"CD"), "makeRegion 0xCF") ||
         !handleError(makeRegion(0x01, 0x02, 0xD0, 142, 34, 30, HPD_FONT_LARGE, (char*)"CDC"), "makeRegion 0xD0") ||
@@ -364,7 +366,7 @@ void SAAB_HPD::recreateAuxRegion() {
         !handleError(makeRegion(0x01, 0x02, 0xD9, 187, 34, 230, HPD_FONT_LARGE, (char*)"No magazine"), "makeRegion 0xD9") ||
         !handleError(makeRegion(0x01, 0x02, 0xDB, 187, 34, 230, HPD_FONT_LARGE, (char*)"Press 1-6 to select CD"), "makeRegion 0xDB") ||
         !handleError(makeRegion(0x01, 0x02, 0xDD, 207, 31, 61, HPD_FONT_MEDIUM, (char*)"No CD"), "makeRegion 0xDD") ||
-        !handleError(makeRegion(0x01, 0x02, 0xDF, 187, 31, 150, HPD_FONT_MEDIUM, (char*)"Play"), "makeRegion 0xDF") ||
+        !handleError(makeRegion(0x01, 0x02, 0xDF, 187, 31, 230, HPD_FONT_MEDIUM, (char*)"Play"), "makeRegion 0xDF") ||
         !handleError(makeRegion(0x01, 0x02, 0xE6, 142, 54, 13, HPD_FONT_SMALL, (char*)"NO"), "makeRegion 0xE6") ||
         !handleError(makeRegion(0x01, 0x02, 0xEA, 170, 54, 19, HPD_FONT_SMALL, (char*)"PTY"), "makeRegion 0xEA") ||
         !handleError(makeRegion(0x01, 0x02, 0xEB, 192, 54, 19, HPD_FONT_SMALL, (char*)"RDM"), "makeRegion 0xEB") ||
@@ -384,7 +386,8 @@ void SAAB_HPD::replaceAuxPlayText(char* text) {
     changeRegion(0x01, 0x02, 0xDF, HPD_VISIBLE, HPD_STYLE_NORMAL, text);
 
     // Change BT region to visible
-    changeRegion(0x01,0x02,0xCD, HPD_VISIBLE, HPD_STYLE_NORMAL);}
+    changeRegion(0x01,0x02,0xCD, HPD_VISIBLE, HPD_STYLE_NORMAL);
+}
 
 void SAAB_HPD::poll() {
     SerialFrame frame;
