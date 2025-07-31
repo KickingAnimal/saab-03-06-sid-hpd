@@ -88,7 +88,9 @@ public:
         MODE_AM,
         MODE_CD,
         MODE_CDC,
-        MODE_CDX
+        MODE_CDX,
+        MODE_CD_SCAN,
+        MODE_RADIO_SCAN,
     };
 
     MODE getMode(); // Returns the current mode based on the last processed frame

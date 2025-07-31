@@ -267,7 +267,10 @@ SAAB_HPD::ERROR SAAB_HPD::makeRegion(uint8_t regionID, uint8_t subRegionID0, uin
     // Copy text to frame data if provided
     int i = 0;
     if (text != nullptr) {
-        while (text[i] != '\0' && i < BUFFER_SIZE - 11) {
+        int maxTextLen = BUFFER_SIZE - 11;
+        int textLen = strlen(text);
+        if (textLen > maxTextLen) textLen = maxTextLen;
+        while (i < textLen) {
             frame.data[11 + i] = text[i];
             i++;
         }
@@ -294,7 +297,10 @@ SAAB_HPD::ERROR SAAB_HPD::changeRegion(uint8_t regionID, uint8_t subRegionID0, u
     // Copy text to frame data if provided
     int i = 0;
     if (text != nullptr) {
-        while (text[i] != '\0' && i < BUFFER_SIZE - 6) {
+        int maxTextLen = BUFFER_SIZE - 6;
+        int textLen = strlen(text);
+        if (textLen > maxTextLen) textLen = maxTextLen;
+        while (i < textLen) {
             frame.data[6 + i] = text[i];
             i++;
         }
@@ -404,8 +410,14 @@ bool SAAB_HPD::recreateAuxRegion() {
 }
 
 void SAAB_HPD::replaceAuxPlayText(char* text) {
-    // Change the "Play" region to the specified text
-    changeRegion(0x01, 0x02, 0xDF, HPD_VISIBLE, HPD_STYLE_NORMAL, text);
+    // Trim text to fit changeRegion
+    int maxTextLen = BUFFER_SIZE - 6;
+    char trimmedText[BUFFER_SIZE] = {0};
+    if (text != nullptr) {
+        strncpy(trimmedText, text, maxTextLen);
+        trimmedText[maxTextLen] = '\0';
+    }
+    changeRegion(0x01, 0x02, 0xDF, HPD_VISIBLE, HPD_STYLE_NORMAL, trimmedText);
 
     // Change BT region to visible
     changeRegion(0x01,0x02,0xCD, HPD_VISIBLE, HPD_STYLE_NORMAL);
@@ -434,8 +446,10 @@ void SAAB_HPD::processMode(const SerialFrame &frame) {
             currentMode = MODE_CDX;
         } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xD0) {
             currentMode = MODE_CDC;
+        } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xD5){
+            currentMode = MODE_CD_SCAN;
         } else if (frame.data[0] == 0x00 && frame.data[2] == 0x00 && frame.data[3] == 0x13) {
-            // Check for FM1, FM2, or AM
+            // Check for FM1, FM2, AM or radio_SCAN
             if (frame.data[6] == 0x46 && frame.data[7] == 0x4D) { // FM
                 if (frame.data[8] == 0x31) {
                     currentMode = MODE_FM1;
@@ -444,6 +458,8 @@ void SAAB_HPD::processMode(const SerialFrame &frame) {
                 }
             } else if (frame.data[6] == 0x41 && frame.data[7] == 0x4D) { // AM
                 currentMode = MODE_AM;
+            } else if (frame.data[6] == 0x52 && frame.data[7] == 0x44) { // Radio scan
+                currentMode = MODE_RADIO_SCAN;
             }
         }
     }
