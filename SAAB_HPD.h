@@ -89,7 +89,6 @@ public:
         MODE_CD,
         MODE_CDC,
         MODE_CDX,
-        MODE_CD_SCAN,
         MODE_RADIO_SCAN,
     };
 

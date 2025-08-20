@@ -446,8 +446,6 @@ void SAAB_HPD::processMode(const SerialFrame &frame) {
             currentMode = MODE_CDX;
         } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xD0) {
             currentMode = MODE_CDC;
-        } else if (frame.data[0] == 0x01 && frame.data[2] == 0x02 && frame.data[3] == 0xD5){
-            currentMode = MODE_CD_SCAN;
         } else if (frame.data[0] == 0x00 && frame.data[2] == 0x00 && frame.data[3] == 0x13) {
             // Check for FM1, FM2, AM or radio_SCAN
             if (frame.data[6] == 0x46 && frame.data[7] == 0x4D) { // FM
